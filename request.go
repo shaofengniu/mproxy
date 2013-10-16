@@ -1,5 +1,11 @@
 package main
 
+import (
+	"encoding/binary"
+	"fmt"
+	"io"
+)
+
 // Request header:
 
 //      Byte/     0       |       1       |       2       |       3       |
@@ -29,13 +35,13 @@ type request struct {
 	cas      uint64
 	body     io.Reader
 	hdrBytes [24]byte
+	tmp      [4]byte
 }
 
-func (r *request) ReadFrom(from io.Reader) (n int64, err error) {
-	hdr := r.hdrBytes
-	_, err = io.ReadFull(from, hdr)
-	if err != nil {
-		return err
+func (r *request) ReadFrom(from io.Reader) (err error) {
+	hdr := r.hdrBytes[:]
+	if _, err = io.ReadFull(from, hdr); err != nil {
+		return
 	}
 
 	if hdr[0] != REQ_MAGIC {
@@ -43,7 +49,7 @@ func (r *request) ReadFrom(from io.Reader) (n int64, err error) {
 	}
 
 	r.opcode = CommandCode(hdr[1])
-	r.kenLen = int(binary.BigEndian.Uint16(hdr[2:]))
+	r.keyLen = int(binary.BigEndian.Uint16(hdr[2:]))
 	r.extraLen = int(hdr[4])
 	r.reserved = int(binary.BigEndian.Uint32(hdr[6:]))
 	r.bodyLen = int(binary.BigEndian.Uint32(hdr[8:]))
@@ -83,7 +89,7 @@ func (r *request) ReadFrom(from io.Reader) (n int64, err error) {
 // The command "delete" allows for explicit deletion of items:
 
 // delete <key> [noreply]\r\n
-func (r *request) WriteTo(to io.Writer) (n int64, err error) {
+func (r *request) WriteTo(to io.Writer) (err error) {
 	switch r.opcode {
 	case GET, GETQ, GETK, GETKQ:
 		return r.writeRetrieval(to)
@@ -92,72 +98,69 @@ func (r *request) WriteTo(to io.Writer) (n int64, err error) {
 	case DELETE, DELETEQ:
 		return r.writeDeletion(to)
 	default:
-		return 0, fmt.Errorf("Unsupported opcode %s", r.opcode)
+		return fmt.Errorf("Unsupported opcode %s", r.opcode)
 	}
 }
 
-// FIXME: n in return values is wrong
-func (r *request) writeRetrieval(to io.Writer) (n int64, err error) {
-	if n, err = fmt.Fprintf(to, "%s ", CommandNames[r.opcode]); err != nil {
+func (r *request) writeRetrieval(to io.Writer) (err error) {
+	if _, err = fmt.Fprintf(to, "%s ", CommandNames[r.opcode]); err != nil {
 		return
 	}
-	if n, err = io.CopyN(to, r.body, r.keyLen); err != nil {
+	if _, err = io.CopyN(to, r.body, int64(r.keyLen)); err != nil {
 		return
 	}
-	if n, err = to.Write(crlf); err != nil {
+	if _, err = to.Write(crlf); err != nil {
 		return
 	}
 	return
 }
 
-func (r *request) writeStorage(to io.Writer) (n int64, err error) {
+func (r *request) writeStorage(to io.Writer) (err error) {
 	// Read extra from request body
 	if r.extraLen != 8 {
-		return 0, fmt.Errorf("Extra length %d is too small", r.extraLen)
+		return fmt.Errorf("Extra length %d is too small", r.extraLen)
 	}
-
-	var tmp [4]byte
-	if n, err = io.ReadFull(r.body, tmp); err != nil {
+	tmp := r.tmp[:]
+	if _, err = io.ReadFull(r.body, tmp); err != nil {
 		return
 	}
 	flags := int(binary.BigEndian.Uint32(tmp))
-
-	if n, err = io.ReadFull(r.body, tmp); err != nil {
+	if _, err = io.ReadFull(r.body, tmp); err != nil {
 		return
 	}
 	expire := int(binary.BigEndian.Uint32(tmp))
-	// Write command
-	if n, err = fmt.Fprintf(to, "%s ", CommandNames[r.opcode]); err != nil {
+
+	if _, err = fmt.Fprintf(to, "%s ", CommandNames[r.opcode]); err != nil {
 		return
 	}
 	// Write key
-	if n, err = io.CopyN(to, r.body, r.keyLen); err != nil {
+	if _, err = io.CopyN(to, r.body, int64(r.keyLen)); err != nil {
 		return
 	}
 	// Write flags expire valuelen
 	// FIXME: noreply
 	vlen := r.bodyLen - r.extraLen - r.keyLen
-	if n, err = fmt.Fprintf(to, " %d %d %d\r\n", flags, expire, vlen); err != nil {
+	if _, err = fmt.Fprintf(to, " %d %d %d\r\n", flags, expire, vlen); err != nil {
 		return
 	}
 	// Write value
-	if n, err = io.CopyN(to, r.body, vlen); err != nil {
+	if _, err = io.CopyN(to, r.body, int64(vlen)); err != nil {
 		return
 	}
-	if n, err = to.Write(crlf); err != nil {
+	if _, err = to.Write(crlf); err != nil {
 		return
 	}
 	return
 }
 
-func (r *request) writeDeletion(to io.Writer) (n int64, err error) {
-	if n, err = fmt.Fprintf(to, "%s ", CommandNames[r.opcode]); err != nil {
+func (r *request) writeDeletion(to io.Writer) (err error) {
+	if _, err = fmt.Fprintf(to, "%s ", CommandNames[r.opcode]); err != nil {
 		return
 	}
-	if n, err = io.CopyN(to, r.body, r.keyLen); err != nil {
+	if _, err = io.CopyN(to, r.body, int64(r.keyLen)); err != nil {
 		return
 	}
-	if n, err = to.Write(crlf); err != nil {
+	if _, err = to.Write(crlf); err != nil {
 		return
 	}
 	return

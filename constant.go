@@ -66,6 +66,8 @@ const (
 // Number of bytes in a binary protocol header.
 const HDR_LEN = 24
 
+const MaxBodyLen = 1 * 1024 * 1024
+
 // Mapping of CommandCode -> name of command (not exhaustive)
 var CommandNames map[CommandCode]string
 

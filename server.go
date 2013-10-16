@@ -89,12 +89,16 @@ func (c *Conn) Read(p []byte) (int, error) {
 	return c.buf.Reader.Read(p)
 }
 
-func (c *Conn) Write(p []byte) (n, error) {
+func (c *Conn) Write(p []byte) (int, error) {
 	return c.buf.Writer.Write(p)
 }
 
 func (c *Conn) WriteTo(w io.Writer) (int64, error) {
 	return c.buf.Reader.WriteTo(c.buf.Writer)
+}
+
+func (c *Conn) Flush() error {
+	return c.buf.Flush()
 }
 
 func (c *Conn) serve() {

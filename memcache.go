@@ -3,7 +3,7 @@ package main
 import (
 	"bufio"
 	"errors"
-	"log"
+	"io"
 	"math/rand"
 	"net"
 	"strings"
@@ -127,7 +127,7 @@ func (c *Client) netTimeout() time.Duration {
 	return DefaultTimeout
 }
 
-func (c *Client) pickConn(key string) (*conn, error) {
+func (c *Client) PickConn(key string) (*conn, error) {
 	addr, err := c.selector.PickServer(key)
 	if err != nil {
 		return nil, err
@@ -211,15 +211,15 @@ func (c *conn) Write(p []byte) (int, error) {
 	return c.rw.Writer.Write(p)
 }
 
-func (c *Conn) WriteTo(w io.Writer) (int64, error) {
+func (c *conn) WriteTo(w io.Writer) (int64, error) {
 	return c.rw.Reader.WriteTo(c.rw.Writer)
 }
 
-func (c *Conn) Close() error {
+func (c *conn) Close() error {
 	return c.nc.Close()
 }
 
-func (c *Conn) Flush() error {
+func (c *conn) Flush() error {
 	return c.rw.Flush()
 }
 
