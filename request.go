@@ -2,8 +2,11 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
+
+	"git.jumbo.ws/go/tcgl/applog"
 )
 
 // Request header:
@@ -38,14 +41,32 @@ type request struct {
 	tmp      [4]byte
 }
 
+type verboseBinaryReader struct {
+	io.Reader
+}
+
+func (r *verboseBinaryReader) Read(p []byte) (n int, err error) {
+	if n, err = r.Reader.Read(p); err == nil {
+		applog.Debugf("\n%s", hex.Dump(p[:n]))
+	}
+	return
+}
+
 func (r *request) ReadFrom(from io.Reader) (err error) {
+	if verbose == 0 {
+		from = &verboseBinaryReader{from}
+	}
+	return r.readCommand(from)
+}
+
+func (r *request) readCommand(from io.Reader) (err error) {
 	hdr := r.hdrBytes[:]
 	if _, err = io.ReadFull(from, hdr); err != nil {
 		return
 	}
 
 	if hdr[0] != REQ_MAGIC {
-		return fmt.Errorf("Bad magic: 0x%02x", hdr[0])
+		return fmt.Errorf("Failed to read request: Bad magic: 0x%02x", hdr[0])
 	}
 
 	r.opcode = CommandCode(hdr[1])
@@ -57,12 +78,23 @@ func (r *request) ReadFrom(from io.Reader) (err error) {
 	r.cas = binary.BigEndian.Uint64(hdr[16:])
 
 	if (r.bodyLen - r.keyLen - r.extraLen) > MaxBodyLen {
-		return fmt.Errorf("BodyLen %d is too big (max %d)", r.bodyLen, MaxBodyLen)
+		return fmt.Errorf("Failed to read request: BodyLen %d is too big (max %d)", r.bodyLen, MaxBodyLen)
 	}
 
 	r.body = from
 
 	return nil
+}
+
+type verboseWriter struct {
+	io.Writer
+}
+
+func (w *verboseWriter) Write(p []byte) (n int, err error) {
+	if n, err = w.Writer.Write(p); err == nil {
+		applog.Debugf("%q", p[:n])
+	}
+	return
 }
 
 // Storage commands
@@ -90,16 +122,24 @@ func (r *request) ReadFrom(from io.Reader) (err error) {
 
 // delete <key> [noreply]\r\n
 func (r *request) WriteTo(to io.Writer) (err error) {
+	if verbose == 0 {
+		to = &verboseWriter{to}
+	}
 	switch r.opcode {
 	case GET, GETQ, GETK, GETKQ:
-		return r.writeRetrieval(to)
+		err = r.writeRetrieval(to)
 	case SET, SETQ, ADD, ADDQ:
-		return r.writeStorage(to)
+		err = r.writeStorage(to)
 	case DELETE, DELETEQ:
-		return r.writeDeletion(to)
+		err = r.writeDeletion(to)
 	default:
-		return fmt.Errorf("Unsupported opcode %s", r.opcode)
+		err = fmt.Errorf("Unsupported opcode %s", r.opcode)
 	}
+
+	if err != nil {
+		err = fmt.Errorf("Failed to write request: %v", err)
+	}
+	return
 }
 
 func (r *request) writeRetrieval(to io.Writer) (err error) {

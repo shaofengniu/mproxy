@@ -4,9 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/ioutil"
+
+	"git.jumbo.ws/go/tcgl/applog"
 )
 
 var (
@@ -19,7 +22,9 @@ var (
 	resultDeleted   = []byte("DELETED\r\n")
 	resultEnd       = []byte("END\r\n")
 
-	resultClientErrorPrefix = []byte("CLIENT_ERROR ")
+	clientError  = []byte("CLIENT_ERROR ")
+	serverError  = []byte("SERVER_ERROR ")
+	commandError = []byte("ERROR\r\n")
 )
 
 // Response header:
@@ -71,28 +76,82 @@ func (r *response) init(opcode CommandCode) {
 	}
 }
 
+type TextReader interface {
+	io.Reader
+	ReadSlice(delim byte) (line []byte, err error)
+}
+
+type verboseTextReader struct {
+	TextReader
+}
+
+func (r *verboseTextReader) Read(p []byte) (n int, err error) {
+	if n, err = r.TextReader.Read(p); err == nil {
+		applog.Debugf("%q", p[:n])
+	}
+	return
+}
+
+func (r *verboseTextReader) ReadSlice(delim byte) (line []byte, err error) {
+	if line, err = r.TextReader.ReadSlice(delim); err == nil {
+		applog.Debugf("%q", line)
+	}
+	return
+}
+
 func (r *response) ReadFrom(from io.Reader) (err error) {
+	var reader TextReader
 	reader, ok := from.(*bufio.Reader)
 	if !ok {
 		reader = bufio.NewReader(from)
 	}
+	if verbose == 0 {
+		reader = &verboseTextReader{reader}
+	}
 
 	switch r.opcode {
 	case GET, GETQ, GETK, GETKQ:
-		return r.readRetrieval(reader)
+		err = r.readRetrieval(reader)
 	case SET, SETQ, ADD, ADDQ:
-		return r.readStorage(reader)
+		err = r.readStorage(reader)
 	case DELETE, DELETEQ:
-		return r.readDeletion(reader)
+		err = r.readDeletion(reader)
 	default:
-		return fmt.Errorf("Unsupported opcode %s", r.opcode)
+		err = fmt.Errorf("Unsupported opcode %s", r.opcode)
 	}
+
+	if err != nil {
+		err = fmt.Errorf("Failed to read response: %v", err)
+	}
+	return
 }
 
-func (r *response) readRetrieval(from *bufio.Reader) (err error) {
+func (r *response) tryReadError(line []byte) bool {
+	applog.Debugf("%q", line)
+	if bytes.HasPrefix(line, clientError) {
+		r.status = EINVAL
+		return true
+	}
+	if bytes.HasPrefix(line, serverError) {
+		r.status = EINTERNAL
+		return true
+	}
+
+	if bytes.Equal(line, commandError) {
+		r.status = UNKNOWN_COMMAND
+		return true
+	}
+	return false
+}
+
+func (r *response) readRetrieval(from TextReader) (err error) {
 	line, err := from.ReadSlice('\n')
 	if err != nil {
 		return
+	}
+
+	if r.tryReadError(line) {
+		return nil
 	}
 
 	if bytes.Equal(line, resultEnd) {
@@ -100,7 +159,7 @@ func (r *response) readRetrieval(from *bufio.Reader) (err error) {
 		return nil
 	}
 
-	pattern := "VALUE %s %d %d %d\r\n"
+	pattern := "VALUE %s %d %d\r\n"
 	dest := []interface{}{&r.key, &r.flags, &r.bytes}
 	n, err := fmt.Sscanf(string(line), pattern, dest...)
 	if err != nil || n != len(dest) {
@@ -111,10 +170,14 @@ func (r *response) readRetrieval(from *bufio.Reader) (err error) {
 	return
 }
 
-func (r *response) readStorage(from *bufio.Reader) (err error) {
+func (r *response) readStorage(from TextReader) (err error) {
 	line, err := from.ReadSlice('\n')
 	if err != nil {
 		return
+	}
+
+	if r.tryReadError(line) {
+		return nil
 	}
 
 	switch {
@@ -133,10 +196,14 @@ func (r *response) readStorage(from *bufio.Reader) (err error) {
 	return
 }
 
-func (r *response) readDeletion(from *bufio.Reader) (err error) {
+func (r *response) readDeletion(from TextReader) (err error) {
 	line, err := from.ReadSlice('\n')
 	if err != nil {
 		return err
+	}
+
+	if r.tryReadError(line) {
+		return nil
 	}
 
 	switch {
@@ -150,21 +217,40 @@ func (r *response) readDeletion(from *bufio.Reader) (err error) {
 	return
 }
 
+type verboseBinaryWriter struct {
+	io.Writer
+}
+
+func (r *verboseBinaryWriter) Write(p []byte) (n int, err error) {
+	if n, err = r.Writer.Write(p); err == nil {
+		applog.Debugf("\n%s", hex.Dump(p[:n]))
+	}
+	return
+}
+
 func (r *response) WriteTo(to io.Writer) (err error) {
+	if verbose == 0 {
+		to = &verboseBinaryWriter{to}
+	}
+
 	if r.status != SUCCESS {
 		return r.writeError(to)
 	}
 
 	switch r.opcode {
 	case GET, GETQ, GETK, GETKQ:
-		return r.writeRetrieval(to)
+		err = r.writeRetrieval(to)
 	case SET, SETQ, ADD, ADDQ:
-		return r.writeStorage(to)
+		err = r.writeStorage(to)
 	case DELETE, DELETEQ:
-		return r.writeDeletion(to)
+		err = r.writeDeletion(to)
 	default:
-		return fmt.Errorf("Unsupported opcode %s", r.opcode)
+		err = fmt.Errorf("Unsupported opcode %s", r.opcode)
 	}
+	if err != nil {
+		err = fmt.Errorf("Failed to write response: %v", err)
+	}
+	return
 }
 
 func (r *response) writeError(to io.Writer) (err error) {
@@ -187,9 +273,9 @@ func (r *response) writeRetrieval(to io.Writer) (err error) {
 	hdr[4] = 4
 	// Total body
 	if r.opcode == GETK || r.opcode == GETKQ {
-		binary.BigEndian.PutUint32(hdr[8:], uint32(len(r.key)+r.bytes))
+		binary.BigEndian.PutUint32(hdr[8:], uint32(len(r.key)+r.bytes+4))
 	} else {
-		binary.BigEndian.PutUint32(hdr[8:], uint32(r.bytes))
+		binary.BigEndian.PutUint32(hdr[8:], uint32(r.bytes+4))
 	}
 
 	// Header

@@ -4,11 +4,12 @@ import (
 	"bufio"
 	"io"
 	"io/ioutil"
-	"log"
 	"net"
 	"runtime"
 	"sync"
 	"time"
+
+	"git.jumbo.ws/go/tcgl/applog"
 )
 
 type Server struct {
@@ -44,24 +45,22 @@ func (srv *Server) Serve(l net.Listener) error {
 				if max := 1 * time.Second; tempDelay > max {
 					tempDelay = max
 				}
-				log.Printf("Accept error: %v; retrying in %v", e, tempDelay)
+				applog.Errorf("Accept error: %v; retrying in %v", e, tempDelay)
 				time.Sleep(tempDelay)
 				continue
 			}
 			return e
 		}
 		tempDelay = 0
-		c, err := srv.newConn(rw)
-		if err != nil {
-			continue
-		}
+		c := srv.newConn(rw)
 		go c.serve()
+		applog.Debugf("Accept connection from %s", c.remoteAddr)
 	}
 }
 
 const noLimit int64 = (1 << 63) - 1
 
-func (srv *Server) newConn(rwc net.Conn) (c *Conn, err error) {
+func (srv *Server) newConn(rwc net.Conn) (c *Conn) {
 	c = new(Conn)
 	c.remoteAddr = rwc.RemoteAddr().String()
 	c.server = srv
@@ -71,7 +70,7 @@ func (srv *Server) newConn(rwc net.Conn) (c *Conn, err error) {
 	c.buf = bufio.NewReadWriter(br, bw)
 	c.bufswr = sr
 	c.bufsww = sw
-	return c, nil
+	return
 }
 
 type Conn struct {
@@ -107,9 +106,10 @@ func (c *Conn) serve() {
 			const size = 4096
 			buf := make([]byte, size)
 			buf = buf[:runtime.Stack(buf, false)]
-			log.Printf("panic serving %v: %v\n%s", c.remoteAddr, err, buf)
+			applog.Warningf("panic serving %v: %v\n%s", c.remoteAddr, err, buf)
 		}
 		c.close() // FIXME: when to close the connection?
+		applog.Debugf("Close connection from %s", c.remoteAddr)
 	}()
 
 	handler := c.server.Handler

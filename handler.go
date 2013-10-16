@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log"
+	"git.jumbo.ws/go/tcgl/applog"
 )
 
 type MemcacheHandler struct {
@@ -17,24 +17,28 @@ func NewMemcacheHandler(ss ServerSelector) *MemcacheHandler {
 func (h *MemcacheHandler) Serve(c *Conn) {
 	remote, err := h.client.PickConn("")
 	if err != nil {
-		log.Println(err)
 		return
 	}
 
 	requests := make(chan CommandCode, 256)
-	complete := make(chan bool, 2)
+	c1 := make(chan bool)
+	c2 := make(chan bool)
 
-	go h.serveRequest(c, remote, requests, complete)
-	go h.serveResponse(remote, c, requests, complete)
+	go h.serveRequest(c, remote, requests, c1)
+	go h.serveResponse(remote, c, requests, c2)
 
-	<-complete
-	<-complete
+	select {
+	case <-c1:
+	case <-c2:
+	}
+	applog.Debugf("Exit handler")
 }
 
 func (h *MemcacheHandler) serveRequest(from *Conn, to *conn, requests chan CommandCode, complete chan bool) (err error) {
 	defer func() {
-		// TODO: handle error
+		applog.Debugf("Exit request loop: %v", err)
 		complete <- true
+		requests <- QUIT
 	}()
 
 	var req request
@@ -45,7 +49,6 @@ func (h *MemcacheHandler) serveRequest(from *Conn, to *conn, requests chan Comma
 		if err = req.WriteTo(to); err != nil {
 			return
 		}
-		// TODO: optimize the flush policy?
 		if err = to.Flush(); err != nil {
 			return
 		}
@@ -56,6 +59,7 @@ func (h *MemcacheHandler) serveRequest(from *Conn, to *conn, requests chan Comma
 
 func (h *MemcacheHandler) serveResponse(from *conn, to *Conn, requests chan CommandCode, complete chan bool) (err error) {
 	defer func() {
+		applog.Debugf("Exit response loop: %v", err)
 		complete <- true
 	}()
 
@@ -63,6 +67,9 @@ func (h *MemcacheHandler) serveResponse(from *conn, to *Conn, requests chan Comm
 	for {
 		select {
 		case req := <-requests:
+			if req == QUIT {
+				return
+			}
 			rsp.init(req)
 			if err = rsp.ReadFrom(from); err != nil {
 				return
