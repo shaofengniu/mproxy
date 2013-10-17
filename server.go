@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"net"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,15 +22,23 @@ type Server struct {
 }
 
 func (srv *Server) ListenAndServe() error {
-	l, e := net.Listen("tcp", srv.Addr)
-	if e != nil {
-		return e
+	l, err := srv.listen()
+	if err != nil {
+		return err
 	}
-
-	return srv.Serve(l)
+	return srv.serve(l)
 }
 
-func (srv *Server) Serve(l net.Listener) error {
+func (srv *Server) listen() (l net.Listener, err error) {
+	addr := srv.Addr
+	if strings.Contains(addr, "/") {
+		return net.Listen("unix", addr)
+	} else {
+		return net.Listen("tcp", addr)
+	}
+}
+
+func (srv *Server) serve(l net.Listener) error {
 	defer l.Close()
 	var tempDelay time.Duration
 	for {

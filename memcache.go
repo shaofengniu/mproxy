@@ -37,7 +37,7 @@ func resumableError(err error) bool {
 }
 
 type ServerSelector interface {
-	SetServers(servers ...string) error
+	SetServers(servers []string) error
 	PickServer(key string) (net.Addr, error)
 }
 
@@ -46,7 +46,7 @@ type ServerList struct {
 	addrs []net.Addr
 }
 
-func (ss *ServerList) SetServers(servers ...string) error {
+func (ss *ServerList) SetServers(servers []string) error {
 	naddr := make([]net.Addr, len(servers))
 	for i, server := range servers {
 		if strings.Contains(server, "/") {

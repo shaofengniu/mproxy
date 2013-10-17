@@ -17,6 +17,7 @@ func NewMemcacheHandler(ss ServerSelector) *MemcacheHandler {
 func (h *MemcacheHandler) Serve(c *Conn) {
 	remote, err := h.client.PickConn("")
 	if err != nil {
+		applog.Errorf("Failed to pick connection: %s", err)
 		return
 	}
 

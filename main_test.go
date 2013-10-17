@@ -1,25 +1,40 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"runtime"
 	"testing"
 
+	"git.jumbo.ws/go/tcgl/applog"
 	"github.com/bmizerany/mc"
 )
 
+var server string
+
+func init() {
+	flag.StringVar(&server, "s", "", "set server address")
+}
+
+func initEnv() {
+	runtime.GOMAXPROCS(runtime.NumCPU())
+	flag.Parse()
+	applog.SetLevel(verbose)
+}
+
+type TB interface {
+	Error(args ...interface{})
+	Errorf(format string, args ...interface{})
+}
+
 func TestSet(t *testing.T) {
-	sc, err := mc.Dial("tcp", ":11211")
-	if err != nil {
-		t.Error(err)
-	}
+	initEnv()
+	addr := newProxy(t)
+	sc := newConn(t, server)
+	pc := newConn(t, addr)
 
-	err = sc.Del("foo")
+	err := sc.Del("foo")
 	if err != nil && err != mc.ErrNotFound {
-		t.Error(err)
-	}
-
-	pc, err := mc.Dial("tcp", ":8080")
-	if err != nil {
 		t.Error(err)
 	}
 
@@ -40,27 +55,21 @@ func TestSet(t *testing.T) {
 }
 
 func BenchmarkSet(b *testing.B) {
-	pc, err := mc.Dial("tcp", ":8080")
-	if err != nil {
-		b.Error(err)
-	}
+	addr := newProxy(b)
+	conn := newConn(b, addr)
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		pc.Set("foo", "bar", 0, 0, 0)
+		conn.Set("foo", "bar", 0, 0, 0)
 	}
 }
 
 func TestGet(t *testing.T) {
-	sc, err := mc.Dial("tcp", ":11211")
-	if err != nil {
-		t.Error(err)
-	}
-	err = sc.Set("foo", "bar", 0, 0, 0)
-	if err != nil {
-		t.Error(err)
-	}
+	addr := newProxy(t)
+	sc := newConn(t, server)
+	pc := newConn(t, addr)
 
-	pc, err := mc.Dial("tcp", ":8080")
+	err := sc.Set("foo", "bar", 0, 0, 0)
 	if err != nil {
 		t.Error(err)
 	}
@@ -76,29 +85,23 @@ func TestGet(t *testing.T) {
 }
 
 func BenchmarkGet(b *testing.B) {
-	pc, err := mc.Dial("tcp", ":8080")
-	if err != nil {
-		b.Error(err)
-	}
+	addr := newProxy(b)
+	conn := newConn(b, addr)
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		pc.Get("foo")
+		conn.Get("foo")
 	}
 }
 
 func TestDelete(t *testing.T) {
-	sc, err := mc.Dial("tcp", ":11211")
-	if err != nil {
-		t.Error(err)
-	}
-	err = sc.Set("foo", "bar", 0, 0, 0)
+	addr := newProxy(t)
+	sc := newConn(t, server)
+	pc := newConn(t, addr)
+
+	err := sc.Set("foo", "bar", 0, 0, 0)
 	if err != nil {
 		err = fmt.Errorf("asf")
-		t.Error(err)
-	}
-
-	pc, err := mc.Dial("tcp", ":8080")
-	if err != nil {
 		t.Error(err)
 	}
 
@@ -116,12 +119,37 @@ func TestDelete(t *testing.T) {
 }
 
 func BenchmarkDelete(b *testing.B) {
-	pc, err := mc.Dial("tcp", ":8080")
-	if err != nil {
-		b.Error(err)
-	}
+	addr := newProxy(b)
+	conn := newConn(b, addr)
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		pc.Del("foo")
+		conn.Del("foo")
 	}
+}
+
+func newProxy(tb TB) string {
+	ss := new(ServerList)
+	ss.SetServers([]string{server})
+	handler := NewMemcacheHandler(ss)
+	s := Server{
+		Addr:    ":0",
+		Handler: handler,
+	}
+	l, err := s.listen()
+	if err != nil {
+		tb.Errorf("Failed to start proxy: %s", err)
+		return ""
+	}
+	go s.serve(l)
+	return l.Addr().String()
+}
+
+func newConn(tb TB, addr string) *mc.Conn {
+	conn, err := mc.Dial("tcp", addr)
+	if err != nil {
+		tb.Errorf("Failed connect to %s: %s", addr, err)
+		return nil
+	}
+	return conn
 }
