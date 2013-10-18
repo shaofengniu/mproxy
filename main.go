@@ -39,7 +39,7 @@ func init() {
 }
 
 type Handler interface {
-	Serve(c *Conn)
+	Serve(c *Conn) error
 }
 
 func main() {
