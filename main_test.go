@@ -10,10 +10,16 @@ import (
 	"github.com/bmizerany/mc"
 )
 
-var server string
+var (
+	server string
+	proxy  string
+	num    int
+)
 
 func init() {
-	flag.StringVar(&server, "s", "", "set server address")
+	flag.StringVar(&server, "server", "", "set server address")
+	flag.StringVar(&proxy, "proxy", "", "set proxy address")
+	flag.IntVar(&num, "num", 1, "number of concurrent connections")
 }
 
 func initEnv() {
@@ -86,12 +92,34 @@ func TestGet(t *testing.T) {
 
 func BenchmarkGet(b *testing.B) {
 	addr := newProxy(b)
-	conn := newConn(b, addr)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		conn.Get("foo")
+	sc := newConn(b, server)
+	pc := newConn(b, addr)
+	errors := 0
+	err := sc.Set("foo", "bar", 0, 0, 0)
+	if err != nil {
+		b.Error(err)
 	}
+
+	done := make(chan bool, num)
+	b.ResetTimer()
+
+	for i := 0; i < num; i++ {
+		go func() {
+			for i := 0; i < b.N; i++ {
+				val, _, _, err := pc.Get("foo")
+				if err != nil || val != "bar" {
+					errors += 1
+					b.Error(err)
+				}
+			}
+			done <- true
+		}()
+
+	}
+	for i := 0; i < num; i++ {
+		<-done
+	}
+	b.Logf("Get errors: %d", errors)
 }
 
 func TestDelete(t *testing.T) {
@@ -129,6 +157,9 @@ func BenchmarkDelete(b *testing.B) {
 }
 
 func newProxy(tb TB) string {
+	if proxy != "" {
+		return proxy
+	}
 	ss := new(ServerList)
 	ss.SetServers([]string{server})
 	handler := NewMemcacheHandler(ss)

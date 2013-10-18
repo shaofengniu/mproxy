@@ -1,6 +1,9 @@
 package main
 
 import (
+	"io"
+	"time"
+
 	"git.jumbo.ws/go/tcgl/applog"
 )
 
@@ -37,20 +40,25 @@ func (h *MemcacheHandler) Serve(c *Conn) {
 
 func (h *MemcacheHandler) serveRequest(from *Conn, to *conn, requests chan CommandCode, complete chan bool) (err error) {
 	defer func() {
-		applog.Debugf("Exit request loop: %v", err)
 		complete <- true
 		requests <- QUIT
 	}()
 
 	var req request
 	for {
-		if err = req.ReadFrom(from); err != nil {
+		if err = req.ReadFrom(from); err != nil && err != io.EOF {
+			applog.Errorf("Failed to read request: %s", err)
 			return
 		}
+		to.extendDeadline()
 		if err = req.WriteTo(to); err != nil {
+			applog.Errorf("Failed to write request: %s", err)
 			return
 		}
+		start := time.Now()
 		if err = to.Flush(); err != nil {
+			delta := time.Now().Sub(start)
+			applog.Errorf("Failed to flush request after %v: %s", delta, err)
 			return
 		}
 
@@ -60,7 +68,9 @@ func (h *MemcacheHandler) serveRequest(from *Conn, to *conn, requests chan Comma
 
 func (h *MemcacheHandler) serveResponse(from *conn, to *Conn, requests chan CommandCode, complete chan bool) (err error) {
 	defer func() {
-		applog.Debugf("Exit response loop: %v", err)
+		if err != nil {
+			applog.Errorf("Exit response loop: %v", err)
+		}
 		complete <- true
 	}()
 
@@ -72,6 +82,7 @@ func (h *MemcacheHandler) serveResponse(from *conn, to *Conn, requests chan Comm
 				return
 			}
 			rsp.init(req)
+			from.extendDeadline()
 			if err = rsp.ReadFrom(from); err != nil {
 				return
 			}
