@@ -3,12 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"io/ioutil"
-
-	"git.jumbo.ws/go/tcgl/applog"
 )
 
 var (
@@ -75,7 +72,7 @@ func (r *response) init(opcode CommandCode) {
 	}
 }
 
-func (r *response) ReadFrom(from *conn) (err error) {
+func (r *response) ReadFrom(from ReadWriter) (err error) {
 	switch r.opcode {
 	case GET, GETQ, GETK, GETKQ:
 		err = r.readRetrieval(from)
@@ -110,7 +107,7 @@ func (r *response) tryReadError(line []byte) bool {
 	return false
 }
 
-func (r *response) readRetrieval(from *conn) (err error) {
+func (r *response) readRetrieval(from ReadWriter) (err error) {
 	line, err := from.ReadSlice('\n')
 	if err != nil {
 		return
@@ -137,7 +134,7 @@ func (r *response) readRetrieval(from *conn) (err error) {
 	return
 }
 
-func (r *response) readStorage(from *conn) (err error) {
+func (r *response) readStorage(from ReadWriter) (err error) {
 	line, err := from.ReadSlice('\n')
 	if err != nil {
 		return
@@ -163,7 +160,7 @@ func (r *response) readStorage(from *conn) (err error) {
 	return
 }
 
-func (r *response) readDeletion(from *conn) (err error) {
+func (r *response) readDeletion(from ReadWriter) (err error) {
 	line, err := from.ReadSlice('\n')
 	if err != nil {
 		return err
@@ -184,22 +181,7 @@ func (r *response) readDeletion(from *conn) (err error) {
 	return
 }
 
-type verboseBinaryWriter struct {
-	io.Writer
-}
-
-func (r *verboseBinaryWriter) Write(p []byte) (n int, err error) {
-	if n, err = r.Writer.Write(p); err == nil {
-		applog.Debugf("\n%s", hex.Dump(p[:n]))
-	}
-	return
-}
-
-func (r *response) WriteTo(to io.Writer) (err error) {
-	if verbose == 0 {
-		to = &verboseBinaryWriter{to}
-	}
-
+func (r *response) WriteTo(to ReadWriter) (err error) {
 	if r.status != SUCCESS {
 		return r.writeError(to)
 	}
@@ -220,7 +202,7 @@ func (r *response) WriteTo(to io.Writer) (err error) {
 	return
 }
 
-func (r *response) writeError(to io.Writer) (err error) {
+func (r *response) writeError(to ReadWriter) (err error) {
 	hdr := r.hdrBytes[:]
 	// Status
 	binary.BigEndian.PutUint16(hdr[6:], uint16(r.status))
@@ -228,7 +210,7 @@ func (r *response) writeError(to io.Writer) (err error) {
 	return err
 }
 
-func (r *response) writeRetrieval(to io.Writer) (err error) {
+func (r *response) writeRetrieval(to ReadWriter) (err error) {
 	hdr := r.hdrBytes[:]
 	// Opcode
 	hdr[1] = byte(r.opcode)
@@ -273,14 +255,14 @@ func (r *response) writeRetrieval(to io.Writer) (err error) {
 	return
 }
 
-func (r *response) writeStorage(to io.Writer) (err error) {
+func (r *response) writeStorage(to ReadWriter) (err error) {
 	hdr := r.hdrBytes[:]
 	binary.BigEndian.PutUint64(hdr[16:], uint64(r.cas))
 	_, err = to.Write(hdr)
 	return err
 }
 
-func (r *response) writeDeletion(to io.Writer) (err error) {
+func (r *response) writeDeletion(to ReadWriter) (err error) {
 	hdr := r.hdrBytes[:]
 	_, err = to.Write(hdr)
 	return err

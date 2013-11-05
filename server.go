@@ -109,6 +109,11 @@ func (c *Conn) Flush() error {
 	return c.buf.Flush()
 }
 
+func (c *Conn) ReadSlice(delim byte) (line []byte, err error) {
+	panic("Unsupported method")
+	return
+}
+
 func (c *Conn) serve() {
 	defer func() {
 		if err := recover(); err != nil {

@@ -2,11 +2,8 @@ package main
 
 import (
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"io"
-
-	"git.jumbo.ws/go/tcgl/applog"
 )
 
 // Request header:
@@ -41,25 +38,11 @@ type request struct {
 	tmp      [4]byte
 }
 
-type verboseBinaryReader struct {
-	io.Reader
-}
-
-func (r *verboseBinaryReader) Read(p []byte) (n int, err error) {
-	if n, err = r.Reader.Read(p); err == nil {
-		applog.Debugf("\n%s", hex.Dump(p[:n]))
-	}
-	return
-}
-
-func (r *request) ReadFrom(from io.Reader) (err error) {
-	if verbose == 0 {
-		from = &verboseBinaryReader{from}
-	}
+func (r *request) ReadFrom(from ReadWriter) (err error) {
 	return r.readCommand(from)
 }
 
-func (r *request) readCommand(from io.Reader) (err error) {
+func (r *request) readCommand(from ReadWriter) (err error) {
 	hdr := r.hdrBytes[:]
 	if _, err = io.ReadFull(from, hdr); err != nil {
 		return
@@ -86,17 +69,6 @@ func (r *request) readCommand(from io.Reader) (err error) {
 	return nil
 }
 
-type verboseWriter struct {
-	io.Writer
-}
-
-func (w *verboseWriter) Write(p []byte) (n int, err error) {
-	if n, err = w.Writer.Write(p); err == nil {
-		applog.Debugf("%q", p[:n])
-	}
-	return
-}
-
 // Storage commands
 // ----------------
 // First, the client sends a command line which looks like this:
@@ -121,7 +93,7 @@ func (w *verboseWriter) Write(p []byte) (n int, err error) {
 // The command "delete" allows for explicit deletion of items:
 
 // delete <key> [noreply]\r\n
-func (r *request) WriteTo(to *conn) (err error) {
+func (r *request) WriteTo(to ReadWriter) (err error) {
 	switch r.opcode {
 	case GET, GETQ, GETK, GETKQ:
 		err = r.writeRetrieval(to)
@@ -139,7 +111,7 @@ func (r *request) WriteTo(to *conn) (err error) {
 	return
 }
 
-func (r *request) writeRetrieval(to *conn) (err error) {
+func (r *request) writeRetrieval(to ReadWriter) (err error) {
 	if _, err = fmt.Fprintf(to, "%s ", CommandNames[r.opcode]); err != nil {
 		return
 	}
@@ -152,7 +124,7 @@ func (r *request) writeRetrieval(to *conn) (err error) {
 	return
 }
 
-func (r *request) writeStorage(to *conn) (err error) {
+func (r *request) writeStorage(to ReadWriter) (err error) {
 	// Read extra from request body
 	if r.extraLen != 8 {
 		return fmt.Errorf("Extra length %d is too small", r.extraLen)
@@ -190,7 +162,7 @@ func (r *request) writeStorage(to *conn) (err error) {
 	return
 }
 
-func (r *request) writeDeletion(to *conn) (err error) {
+func (r *request) writeDeletion(to ReadWriter) (err error) {
 	if _, err = fmt.Fprintf(to, "%s ", CommandNames[r.opcode]); err != nil {
 		return
 	}

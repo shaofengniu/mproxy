@@ -31,12 +31,19 @@ func (h *MemcacheHandler) Serve(c *Conn) (err error) {
 		}
 	}()
 
+	var clientConn ReadWriter = c
+	var serverConn ReadWriter = remote
+	if verbose == 0 {
+		clientConn = NewVerboseReadWriter(clientConn)
+		serverConn = NewVerboseReadWriter(serverConn)
+	}
+
 	requests := make(chan CommandCode, 256)
 	c1 := make(chan error)
 	c2 := make(chan error)
 
-	go h.serveRequest(c, remote, requests, c1)
-	go h.serveResponse(remote, c, requests, c2)
+	go h.serveRequest(clientConn, serverConn, requests, c1)
+	go h.serveResponse(serverConn, clientConn, requests, c2)
 
 	select {
 	case err = <-c1:
@@ -45,7 +52,7 @@ func (h *MemcacheHandler) Serve(c *Conn) (err error) {
 	return
 }
 
-func (h *MemcacheHandler) serveRequest(from *Conn, to *conn, requests chan CommandCode, errchan chan error) {
+func (h *MemcacheHandler) serveRequest(from, to ReadWriter, requests chan CommandCode, errchan chan error) {
 	var err error
 	defer func() {
 		errchan <- err
@@ -58,7 +65,6 @@ func (h *MemcacheHandler) serveRequest(from *Conn, to *conn, requests chan Comma
 			applog.Errorf("Failed to read request: %s", err)
 			return
 		}
-		to.extendDeadline()
 		if err = req.WriteTo(to); err != nil {
 			applog.Errorf("Failed to write request: %s", err)
 			return
@@ -74,7 +80,7 @@ func (h *MemcacheHandler) serveRequest(from *Conn, to *conn, requests chan Comma
 	}
 }
 
-func (h *MemcacheHandler) serveResponse(from *conn, to *Conn, requests chan CommandCode, errchan chan error) {
+func (h *MemcacheHandler) serveResponse(from, to ReadWriter, requests chan CommandCode, errchan chan error) {
 	var err error
 	defer func() {
 		if err != nil {
@@ -91,7 +97,6 @@ func (h *MemcacheHandler) serveResponse(from *conn, to *Conn, requests chan Comm
 				return
 			}
 			rsp.init(req)
-			from.extendDeadline()
 			start := time.Now()
 			if err = rsp.ReadFrom(from); err != nil {
 				delta := time.Now().Sub(start)

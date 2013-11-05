@@ -2,15 +2,13 @@ package main
 
 import (
 	"bufio"
-	"encoding/hex"
 	"errors"
+	"io"
 	"math/rand"
 	"net"
 	"strings"
 	"sync"
 	"time"
-
-	"git.jumbo.ws/go/tcgl/applog"
 )
 
 var (
@@ -207,23 +205,17 @@ type conn struct {
 
 func (c *conn) Read(p []byte) (n int, err error) {
 	c.extendDeadline()
-	n, err = c.rw.Reader.Read(p)
-	applog.Debugf("\n%s", hex.Dump(p[:n]))
-	return
+	return c.rw.Reader.Read(p)
 }
 
 func (c *conn) ReadSlice(delim byte) (line []byte, err error) {
 	c.extendDeadline()
-	line, err = c.rw.Reader.ReadSlice(delim)
-	applog.Debugf("\n%s", hex.Dump(line))
-	return
+	return c.rw.Reader.ReadSlice(delim)
 }
 
 func (c *conn) Write(p []byte) (n int, err error) {
 	c.extendDeadline()
-	n, err = c.rw.Writer.Write(p)
-	applog.Debugf("\n%s", hex.Dump(p[:n]))
-	return
+	return c.rw.Writer.Write(p)
 }
 
 func (c *conn) WriteTo(w io.Writer) (int64, error) {
