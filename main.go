@@ -31,7 +31,7 @@ var (
 )
 
 func init() {
-	flag.IntVar(&verbose, "v", 1, "set verbosity level")
+	flag.IntVar(&verbose, "v", 3, "set verbosity level")
 	flag.StringVar(&local, "l", ":8080", "set local address")
 	flag.Var(&remotes, "r", "remote address")
 	flag.StringVar(&cpuprofile, "cpuprofile", "", "write cpu profile to this file")

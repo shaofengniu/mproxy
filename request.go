@@ -104,10 +104,6 @@ func (r *request) WriteTo(to ReadWriter) (err error) {
 	default:
 		err = fmt.Errorf("Unsupported opcode %s", r.opcode)
 	}
-
-	if err != nil {
-		err = fmt.Errorf("Failed to write request: %v", err)
-	}
 	return
 }
 

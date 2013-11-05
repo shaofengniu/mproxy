@@ -25,10 +25,6 @@ func (h *MemcacheHandler) Serve(c *Conn) (err error) {
 	}
 	defer func() {
 		remote.condRelease(&err)
-		applog.Debugf("Exit handler")
-		if err != nil {
-			applog.Errorf("Unrecoverable error: %s", err)
-		}
 	}()
 
 	var clientConn ReadWriter = c
@@ -62,17 +58,17 @@ func (h *MemcacheHandler) serveRequest(from, to ReadWriter, requests chan Comman
 	var req request
 	for {
 		if err = req.ReadFrom(from); err != nil && err != io.EOF {
-			applog.Errorf("Failed to read request: %s", err)
+			applog.Warningf("Failed to read request: %s", err)
 			return
 		}
 		if err = req.WriteTo(to); err != nil {
-			applog.Errorf("Failed to write request: %s", err)
+			applog.Warningf("Failed to write request: %s", err)
 			return
 		}
 		start := time.Now()
 		if err = to.Flush(); err != nil {
 			delta := time.Now().Sub(start)
-			applog.Errorf("Failed to flush request after %v: %s", delta, err)
+			applog.Warningf("Failed to flush request after %v: %s", delta, err)
 			return
 		}
 
@@ -83,9 +79,6 @@ func (h *MemcacheHandler) serveRequest(from, to ReadWriter, requests chan Comman
 func (h *MemcacheHandler) serveResponse(from, to ReadWriter, requests chan CommandCode, errchan chan error) {
 	var err error
 	defer func() {
-		if err != nil {
-			applog.Errorf("Exit response loop: %v", err)
-		}
 		errchan <- err
 	}()
 
@@ -100,7 +93,7 @@ func (h *MemcacheHandler) serveResponse(from, to ReadWriter, requests chan Comma
 			start := time.Now()
 			if err = rsp.ReadFrom(from); err != nil {
 				delta := time.Now().Sub(start)
-				applog.Errorf("Failed to read response after %v: %s", delta, err)
+				applog.Warningf("Failed to read response after %v: %s", delta, err)
 				return
 			}
 			if err = rsp.WriteTo(to); err != nil {
