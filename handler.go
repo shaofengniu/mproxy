@@ -26,6 +26,9 @@ func (h *MemcacheHandler) Serve(c *Conn) (err error) {
 	defer func() {
 		remote.condRelease(&err)
 		applog.Debugf("Exit handler")
+		if err != nil {
+			applog.Errorf("Unrecoverable error: %s", err)
+		}
 	}()
 
 	requests := make(chan CommandCode, 256)
@@ -89,7 +92,10 @@ func (h *MemcacheHandler) serveResponse(from *conn, to *Conn, requests chan Comm
 			}
 			rsp.init(req)
 			from.extendDeadline()
+			start := time.Now()
 			if err = rsp.ReadFrom(from); err != nil {
+				delta := time.Now().Sub(start)
+				applog.Errorf("Failed to read response after %v: %s", delta, err)
 				return
 			}
 			if err = rsp.WriteTo(to); err != nil {

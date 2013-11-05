@@ -121,10 +121,7 @@ func (w *verboseWriter) Write(p []byte) (n int, err error) {
 // The command "delete" allows for explicit deletion of items:
 
 // delete <key> [noreply]\r\n
-func (r *request) WriteTo(to io.Writer) (err error) {
-	if verbose == 0 {
-		to = &verboseWriter{to}
-	}
+func (r *request) WriteTo(to *conn) (err error) {
 	switch r.opcode {
 	case GET, GETQ, GETK, GETKQ:
 		err = r.writeRetrieval(to)
@@ -142,7 +139,7 @@ func (r *request) WriteTo(to io.Writer) (err error) {
 	return
 }
 
-func (r *request) writeRetrieval(to io.Writer) (err error) {
+func (r *request) writeRetrieval(to *conn) (err error) {
 	if _, err = fmt.Fprintf(to, "%s ", CommandNames[r.opcode]); err != nil {
 		return
 	}
@@ -155,7 +152,7 @@ func (r *request) writeRetrieval(to io.Writer) (err error) {
 	return
 }
 
-func (r *request) writeStorage(to io.Writer) (err error) {
+func (r *request) writeStorage(to *conn) (err error) {
 	// Read extra from request body
 	if r.extraLen != 8 {
 		return fmt.Errorf("Extra length %d is too small", r.extraLen)
@@ -193,7 +190,7 @@ func (r *request) writeStorage(to io.Writer) (err error) {
 	return
 }
 
-func (r *request) writeDeletion(to io.Writer) (err error) {
+func (r *request) writeDeletion(to *conn) (err error) {
 	if _, err = fmt.Fprintf(to, "%s ", CommandNames[r.opcode]); err != nil {
 		return
 	}

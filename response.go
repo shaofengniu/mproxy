@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
@@ -76,46 +75,14 @@ func (r *response) init(opcode CommandCode) {
 	}
 }
 
-type TextReader interface {
-	io.Reader
-	ReadSlice(delim byte) (line []byte, err error)
-}
-
-type verboseTextReader struct {
-	TextReader
-}
-
-func (r *verboseTextReader) Read(p []byte) (n int, err error) {
-	if n, err = r.TextReader.Read(p); err == nil {
-		applog.Debugf("%q", p[:n])
-	}
-	return
-}
-
-func (r *verboseTextReader) ReadSlice(delim byte) (line []byte, err error) {
-	if line, err = r.TextReader.ReadSlice(delim); err == nil {
-		applog.Debugf("%q", line)
-	}
-	return
-}
-
-func (r *response) ReadFrom(from io.Reader) (err error) {
-	var reader TextReader
-	reader, ok := from.(*bufio.Reader)
-	if !ok {
-		reader = bufio.NewReader(from)
-	}
-	if verbose == 0 {
-		reader = &verboseTextReader{reader}
-	}
-
+func (r *response) ReadFrom(from *conn) (err error) {
 	switch r.opcode {
 	case GET, GETQ, GETK, GETKQ:
-		err = r.readRetrieval(reader)
+		err = r.readRetrieval(from)
 	case SET, SETQ, ADD, ADDQ:
-		err = r.readStorage(reader)
+		err = r.readStorage(from)
 	case DELETE, DELETEQ:
-		err = r.readDeletion(reader)
+		err = r.readDeletion(from)
 	default:
 		err = fmt.Errorf("Unsupported opcode %s", r.opcode)
 	}
@@ -127,7 +94,6 @@ func (r *response) ReadFrom(from io.Reader) (err error) {
 }
 
 func (r *response) tryReadError(line []byte) bool {
-	applog.Debugf("%q", line)
 	if bytes.HasPrefix(line, clientError) {
 		r.status = EINVAL
 		return true
@@ -144,7 +110,7 @@ func (r *response) tryReadError(line []byte) bool {
 	return false
 }
 
-func (r *response) readRetrieval(from TextReader) (err error) {
+func (r *response) readRetrieval(from *conn) (err error) {
 	line, err := from.ReadSlice('\n')
 	if err != nil {
 		return
@@ -167,10 +133,11 @@ func (r *response) readRetrieval(from TextReader) (err error) {
 	}
 
 	r.data = from
+
 	return
 }
 
-func (r *response) readStorage(from TextReader) (err error) {
+func (r *response) readStorage(from *conn) (err error) {
 	line, err := from.ReadSlice('\n')
 	if err != nil {
 		return
@@ -196,7 +163,7 @@ func (r *response) readStorage(from TextReader) (err error) {
 	return
 }
 
-func (r *response) readDeletion(from TextReader) (err error) {
+func (r *response) readDeletion(from *conn) (err error) {
 	line, err := from.ReadSlice('\n')
 	if err != nil {
 		return err
@@ -298,10 +265,11 @@ func (r *response) writeRetrieval(to io.Writer) (err error) {
 	if _, err = io.CopyN(to, r.data, int64(r.bytes)); err != nil {
 		return
 	}
-	// Discard the \r\n from reader
-	if _, err = io.CopyN(ioutil.Discard, r.data, 2); err != nil {
+	// Discard the \r\nEND\r\n from reader
+	if _, err = io.CopyN(ioutil.Discard, r.data, 7); err != nil {
 		return
 	}
+
 	return
 }
 
